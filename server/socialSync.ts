@@ -221,6 +221,7 @@ export async function syncFacebookPosts(input: {
   const account = await findSocialAccount(input.brandId, "facebook", input.accountId);
   const pageId = input.pageId ?? account?.pageId ?? FacebookClient.defaultPageIds()[0];
   if (!pageId) throw new Error("Missing Facebook page_id");
+  const pageIds = !input.pageId && !account?.pageId ? FacebookClient.defaultPageIds() : [pageId];
 
   return runTrackedSync({
     brandId: input.brandId,
@@ -229,25 +230,29 @@ export async function syncFacebookPosts(input: {
     account,
     action: async () => {
       const client = new FacebookClient(account?.accessTokenEnvKey);
-      const posts = await client.fetchPosts(pageId, input.daysBack ?? 365);
-      const stats: SyncStats = { fetched: posts.length, upserted: 0, errors: 0 };
+      const stats: SyncStats = { fetched: 0, upserted: 0, errors: 0 };
 
-      for (const post of posts) {
-        try {
-          const insights = input.skipInsights || !post.id ? {} : await client.fetchPostInsights(post.id);
-          const data = mapFacebookPostToContentInput(post, insights, {
-            brandId: input.brandId,
-            socialAccountId: account?.id,
-            pageId,
-          });
-          if (!data.externalId) {
+      for (const currentPageId of pageIds) {
+        const posts = await client.fetchPosts(currentPageId, input.daysBack ?? 365);
+        stats.fetched += posts.length;
+
+        for (const post of posts) {
+          try {
+            const insights = input.skipInsights || !post.id ? {} : await client.fetchPostInsights(post.id, currentPageId);
+            const data = mapFacebookPostToContentInput(post, insights, {
+              brandId: input.brandId,
+              socialAccountId: account?.id,
+              pageId: currentPageId,
+            });
+            if (!data.externalId) {
+              stats.errors += 1;
+              continue;
+            }
+            await upsertContentHistoryByExternalId(data);
+            stats.upserted += 1;
+          } catch (_error) {
             stats.errors += 1;
-            continue;
           }
-          await upsertContentHistoryByExternalId(data);
-          stats.upserted += 1;
-        } catch (_error) {
-          stats.errors += 1;
         }
       }
 

@@ -199,14 +199,24 @@ export class FacebookClient {
     return readJsonList(process.env.FB_PAGE_IDS);
   }
 
-  private getPageAccessToken() {
-    const token = getEnvValue(this.tokenEnvKey) ?? process.env.FB_PAGE_ACCESS_TOKEN;
+  static defaultPageAccessTokens() {
+    return readJsonList(process.env.FB_PAGE_ACCESS_TOKEN);
+  }
+
+  private getPageAccessToken(pageId?: string) {
+    const explicitToken = getEnvValue(this.tokenEnvKey);
+    if (explicitToken) return explicitToken;
+
+    const tokens = FacebookClient.defaultPageAccessTokens();
+    const pageIds = FacebookClient.defaultPageIds();
+    const pageIndex = pageId ? pageIds.indexOf(pageId) : -1;
+    const token = pageIndex >= 0 ? tokens[pageIndex] : tokens[0];
     if (!token) throw new Error("Missing Facebook page access token");
     return token;
   }
 
   async fetchPosts(pageId: string, daysBack = 365, limit = 100) {
-    const token = this.getPageAccessToken();
+    const token = this.getPageAccessToken(pageId);
     const posts: FacebookPost[] = [];
     const since = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000);
     let nextUrl: string | null = `${FACEBOOK_GRAPH_API_BASE_URL}/${pageId}/feed`;
@@ -229,8 +239,8 @@ export class FacebookClient {
     return posts;
   }
 
-  async fetchPostInsights(postId: string) {
-    const token = this.getPageAccessToken();
+  async fetchPostInsights(postId: string, pageId?: string) {
+    const token = this.getPageAccessToken(pageId);
     const insightMetrics = ["post_impressions", "post_impressions_unique", "post_clicks", "post_reactions_by_type_total"];
     const insights: JsonRecord = {};
 
