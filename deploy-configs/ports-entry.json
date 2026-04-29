@@ -1,0 +1,18 @@
+{
+  "_comment": "Add this entry to D:\\Server\\config\\ports.json in the ports array",
+  "entry": {
+    "id": "brandos",
+    "name": "BrandOS",
+    "description": "Content & Ads Operating System - AI-powered content strategy and ads optimization for all JLC Group brands",
+    "domain": "marketing",
+    "port": 40200,
+    "portOld": null,
+    "type": "fullstack",
+    "framework": "react-trpc-express",
+    "deployPath": "deploy/brandos",
+    "sourcePath": "apps/brandos",
+    "nginxDomain": "brandos.jlcgroup.co",
+    "status": "development",
+    "note": "Unified Content Brain + Ads Optimization platform. Replaces jula_content_brain. Supports multi-brand: JULA'S HERB, J-DENT, JARVIT, JNIS, BEAUTERRY"
+  }
+}
