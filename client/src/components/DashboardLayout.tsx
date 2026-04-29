@@ -78,9 +78,10 @@ const menuGroups = [
     ],
   },
   {
-    label: "บันทึก",
+    label: "Content Ops",
     items: [
-      { icon: History, label: "Content History", path: "/history" },
+      { icon: History, label: "Content Library", path: "/contents" },
+      { icon: Package, label: "Product Sets", path: "/product-sets" },
     ],
   },
 ];
@@ -183,18 +184,20 @@ function DashboardLayoutContent({
   return (
     <>
       <div className="relative" ref={sidebarRef}>
-        <Sidebar collapsible="icon" className="border-r border-sidebar-border" disableTransition={isResizing}>
+        <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar/95 shadow-sm backdrop-blur" disableTransition={isResizing}>
           <SidebarHeader className="h-16 justify-center border-b border-sidebar-border">
             <div className="flex items-center gap-3 px-2">
               <button
                 onClick={toggleSidebar}
-                className="h-8 w-8 flex items-center justify-center hover:bg-sidebar-accent rounded-lg transition-colors shrink-0"
+                className="h-8 w-8 flex items-center justify-center hover:bg-sidebar-accent rounded-xl transition-colors shrink-0"
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
               {!isCollapsed && (
                 <div className="flex items-center gap-2 min-w-0">
-                  <Brain className="h-5 w-5 text-primary shrink-0" />
+                  <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/20">
+                    <Brain className="h-4 w-4 text-primary-foreground shrink-0" />
+                  </span>
                   <span className="font-bold text-sm tracking-tight truncate gradient-text">
                     Content Brain
                   </span>
@@ -220,9 +223,9 @@ function DashboardLayoutContent({
                           isActive={isActive}
                           onClick={() => setLocation(item.path)}
                           tooltip={item.label}
-                          className={`h-9 transition-all font-normal text-sm ${
+                          className={`h-9 rounded-xl transition-all font-normal text-sm ${
                             isActive
-                              ? "bg-primary/15 text-primary font-medium"
+                              ? "bg-primary/15 text-primary font-medium shadow-sm"
                               : "text-sidebar-foreground/80 hover:text-sidebar-foreground"
                           }`}
                         >
@@ -243,7 +246,7 @@ function DashboardLayoutContent({
           <SidebarFooter className="p-3 border-t border-sidebar-border">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-sidebar-accent/50 transition-colors w-full text-left focus:outline-none">
+                <button className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-sidebar-accent/60 transition-colors w-full text-left focus:outline-none">
                   <Avatar className="h-8 w-8 border border-sidebar-border shrink-0">
                     <AvatarFallback className="text-xs font-medium bg-primary/20 text-primary">
                       {user?.name?.charAt(0).toUpperCase() ?? "U"}
@@ -280,7 +283,7 @@ function DashboardLayoutContent({
 
       <SidebarInset>
         {isMobile && (
-          <div className="flex border-b border-border h-14 items-center justify-between bg-background/95 px-4 backdrop-blur sticky top-0 z-40">
+          <div className="flex border-b border-border/80 h-14 items-center justify-between bg-card/85 px-4 backdrop-blur sticky top-0 z-40 shadow-sm">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="h-9 w-9 rounded-lg" />
               <span className="font-medium text-sm">{activeItem?.label ?? "Menu"}</span>

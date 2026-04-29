@@ -24,9 +24,13 @@ import {
   updateCalendarEntry,
   deleteCalendarEntry,
   getContentHistory,
+  getContentHistoryById,
+  getContentHistorySummary,
   createContentHistory,
   updateContentHistory,
+  updateContentHistorySkus,
   deleteContentHistory,
+  getProductSets,
   getPerformanceData,
   insertPerformanceData,
   getPerformanceSummary,
@@ -181,6 +185,7 @@ const calendarRouter = router({
     .input(z.object({
       brandId: z.number(),
       skuId: z.number().optional(),
+      skuIds: z.array(z.number()).optional(),
       title: z.string(),
       contentType: z.string(),
       hook: z.string().optional(),
@@ -273,14 +278,129 @@ ${skuText}
 });
 
 // ─── Content History Router ───────────────────────────────────────────────────
+const historyFiltersSchema = z.object({
+  limit: z.number().min(1).max(200).default(50),
+  offset: z.number().min(0).default(0),
+  brandId: z.number().optional(),
+  search: z.string().optional(),
+  view: z.enum(["all", "last100", "bestPFM", "notProper", "shouldRunAds", "noProductMapping", "highEngagement", "multiSku"]).default("all"),
+  platform: z.string().optional(),
+  contentType: z.string().optional(),
+  skuId: z.number().optional(),
+  productSetId: z.number().optional(),
+  mapping: z.enum(["all", "mapped", "unmapped"]).default("all"),
+  status: z.enum(["all", "published", "unpublished"]).default("all"),
+  contentStatus: z.string().optional(),
+  sortBy: z.enum(["publishedAt", "createdAt", "views", "reach", "likes", "comments", "shares", "bookmarks", "pfmScore", "totalMediaCost", "adsCount"]).default("publishedAt"),
+  sortDir: z.enum(["asc", "desc"]).default("desc"),
+});
+
 const historyRouter = router({
   list: protectedProcedure
-    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0), brandId: z.number().optional() }))
-    .query(({ input }) => getContentHistory(input.limit, input.offset, input.brandId)),
+    .input(historyFiltersSchema)
+    .query(({ input }) => getContentHistory(
+      input.view === "last100" ? Math.min(input.limit, 100) : input.limit,
+      input.offset,
+      input.brandId,
+      input,
+    )),
+  summary: protectedProcedure
+    .input(historyFiltersSchema.omit({ limit: true, offset: true }))
+    .query(({ input }) => getContentHistorySummary(input.brandId, input)),
+  analyzeWithAI: protectedProcedure
+    .input(z.object({ id: z.number(), brandId: z.number().optional() }))
+    .mutation(async ({ input }) => {
+      const item = await getContentHistoryById(input.id);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Content not found" });
+      const brandId = input.brandId ?? item.brandId ?? undefined;
+      const [skuList, rules] = await Promise.all([
+        getSkus(brandId),
+        getBrandRules(brandId),
+      ]);
+      const response = await invokeLLM({
+        messages: [
+          {
+            role: "system",
+            content: "คุณเป็น BrandOS AI Strategist ที่ช่วยทีม content, sale และ performance marketing วิเคราะห์ content ภาษาไทยอย่างเป็นระบบและตอบเป็น JSON เท่านั้น",
+          },
+          {
+            role: "user",
+            content: `วิเคราะห์ content นี้เพื่อช่วยทีม Jula's Herb ตัดสินใจต่อยอดด้าน content, sale และ marketing
+
+Content:
+${JSON.stringify({
+  id: item.id,
+  title: item.title,
+  hook: item.hook,
+  caption: item.caption,
+  platform: item.platform,
+  contentType: item.contentType,
+  publishedAt: item.publishedAt,
+  metrics: {
+    views: item.views,
+    reach: item.reach,
+    likes: item.likes,
+    bookmarks: item.bookmarks,
+    comments: item.comments,
+    shares: item.shares,
+    pfmScore: item.pfmScore,
+    totalMediaCost: item.totalMediaCost,
+    adsCount: item.adsCount,
+  },
+  contentStatus: item.contentStatus,
+  contentExpireDate: item.contentExpireDate,
+  currentSkuIds: item.skuMappings?.map((mapping) => mapping.skuId) ?? (item.skuId ? [item.skuId] : []),
+  currentSkus: item.skuMappings?.map((mapping) => ({ id: mapping.skuId, sku: mapping.sku, name: mapping.name })) ?? [],
+  notes: item.notes,
+}, null, 2)}
+
+Available SKUs:
+${skuList.map((sku) => `- id=${sku.id} ${sku.name} (${sku.category ?? "uncategorized"}): ${sku.description ?? ""}`).join("\n") || "- none"}
+
+Brand rules:
+${rules.slice(0, 12).map((rule) => `- [${rule.category}] ${rule.title}: ${rule.content}`).join("\n") || "- none"}
+
+ตอบเป็น JSON รูปแบบนี้:
+{
+  "summary": "สรุป content 1-2 ประโยค",
+  "salesAngle": "มุมขายที่ควรใช้",
+  "recommendedSkuIds": [1, 2],
+  "recommendedSkuNames": ["ชื่อสินค้า 1", "ชื่อสินค้า 2"],
+  "funnelStage": "awareness|consideration|conversion|retention",
+  "organicScore": 0-100,
+  "adsPotential": "low|medium|high",
+  "recommendedActions": ["action 1", "action 2", "action 3"],
+  "nextContentIdeas": ["idea 1", "idea 2"],
+  "reasoning": "เหตุผลสั้นๆ"
+}`,
+          },
+        ],
+        response_format: { type: "json_object" },
+      });
+      const rawContent = response.choices[0]?.message?.content;
+      const content = typeof rawContent === "string" ? rawContent : "{}";
+      try {
+        return JSON.parse(content);
+      } catch (_error) {
+        return {
+          summary: content,
+          salesAngle: "",
+          recommendedSkuIds: [],
+          recommendedSkuNames: [],
+          funnelStage: "awareness",
+          organicScore: 0,
+          adsPotential: "medium",
+          recommendedActions: [],
+          nextContentIdeas: [],
+          reasoning: "AI response was not valid JSON",
+        };
+      }
+    }),
   create: protectedProcedure
     .input(z.object({
       brandId: z.number(),
       skuId: z.number().optional(),
+      skuIds: z.array(z.number()).optional(),
       title: z.string(),
       contentType: z.string(),
       hook: z.string().optional(),
@@ -290,27 +410,78 @@ const historyRouter = router({
       videoUrl: z.string().optional(),
       views: z.number().optional(),
       likes: z.number().optional(),
+      bookmarks: z.number().optional(),
       comments: z.number().optional(),
       shares: z.number().optional(),
+      pfmScore: z.number().optional(),
+      totalMediaCost: z.number().optional(),
+      adsCount: z.number().optional(),
+      contentStatus: z.string().nullable().optional(),
+      contentExpireDate: z.date().nullable().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(({ input }) => createContentHistory({ ...input, contentType: input.contentType as any })),
+    .mutation(async ({ input }) => {
+      const { skuIds, ...data } = input;
+      const id = await createContentHistory({ ...data, skuId: data.skuId ?? skuIds?.[0], contentType: input.contentType as any });
+      if (skuIds?.length) await updateContentHistorySkus(id, skuIds);
+      return id;
+    }),
   update: protectedProcedure
     .input(z.object({
       id: z.number(),
+      skuId: z.number().nullable().optional(),
+      skuIds: z.array(z.number()).optional(),
+      title: z.string().optional(),
+      contentType: z.string().optional(),
+      hook: z.string().nullable().optional(),
+      caption: z.string().nullable().optional(),
       views: z.number().optional(),
+      reach: z.number().optional(),
       likes: z.number().optional(),
+      bookmarks: z.number().optional(),
       comments: z.number().optional(),
       shares: z.number().optional(),
+      pfmScore: z.number().optional(),
+      totalMediaCost: z.number().optional(),
+      adsCount: z.number().optional(),
+      contentStatus: z.string().nullable().optional(),
+      contentExpireDate: z.date().nullable().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(({ input }) => {
-      const { id, ...rest } = input;
-      return updateContentHistory(id, rest);
+    .mutation(async ({ input }) => {
+      const { id, contentType, skuIds, ...rest } = input;
+      await updateContentHistory(id, { ...rest, ...(contentType ? { contentType: contentType as any } : {}) });
+      if (skuIds !== undefined) await updateContentHistorySkus(id, skuIds);
+      return { success: true };
+    }),
+  updateSkus: protectedProcedure
+    .input(z.object({ id: z.number(), skuIds: z.array(z.number()) }))
+    .mutation(({ input }) => updateContentHistorySkus(input.id, input.skuIds)),
+  bulkUpdateSkus: protectedProcedure
+    .input(z.object({ ids: z.array(z.number()), skuIds: z.array(z.number()) }))
+    .mutation(async ({ input }) => {
+      for (const id of input.ids) {
+        await updateContentHistorySkus(id, input.skuIds);
+      }
+      return { updated: input.ids.length };
     }),
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(({ input }) => deleteContentHistory(input.id)),
+});
+
+// ─── Product Sets Router ─────────────────────────────────────────────────────
+const productSetsRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      brandId: z.number().optional(),
+      search: z.string().optional(),
+      limit: z.number().min(1).max(200).default(100),
+      offset: z.number().min(0).default(0),
+      sortBy: z.enum(["contentCount", "avgPfmScore", "totalViews", "totalMediaCost", "lastContentAt"]).default("contentCount"),
+      sortDir: z.enum(["asc", "desc"]).default("desc"),
+    }))
+    .query(({ input }) => getProductSets(input)),
 });
 
 // ─── Performance Router ───────────────────────────────────────────────────────
@@ -639,6 +810,7 @@ export const appRouter = router({
   sku: skuRouter,
   calendar: calendarRouter,
   history: historyRouter,
+  productSets: productSetsRouter,
   performance: performanceRouter,
   social: socialRouter,
   antiAnnoy: antiAnnoyRouter,

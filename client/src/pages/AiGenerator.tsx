@@ -25,7 +25,7 @@ export default function AiGenerator() {
     onError: () => toast.error("AI สร้าง Content ไม่สำเร็จ"),
   });
   const saveMutation = trpc.history.create.useMutation({
-    onSuccess: () => { utils.history.list.invalidate(); toast.success("บันทึกลง Content History แล้ว"); },
+    onSuccess: () => { utils.history.list.invalidate(); toast.success("บันทึกลง Content Library แล้ว"); },
     onError: () => toast.error("บันทึกไม่สำเร็จ"),
   });
 

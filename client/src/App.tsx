@@ -13,6 +13,7 @@ import AntiAnnoy from "./pages/AntiAnnoy";
 import PerformanceAnalysis from "./pages/PerformanceAnalysis";
 import AiGenerator from "./pages/AiGenerator";
 import ContentHistory from "./pages/ContentHistory";
+import ProductSets from "./pages/ProductSets";
 import PerformanceImport from "./pages/PerformanceImport";
 import AdsRecommendation from "./pages/AdsRecommendation";
 import SocialSync from "./pages/SocialSync";
@@ -27,7 +28,9 @@ function Router() {
       <Route path="/anti-annoy" component={AntiAnnoy} />
       <Route path="/performance" component={PerformanceAnalysis} />
       <Route path="/ai-generator" component={AiGenerator} />
+      <Route path="/contents" component={ContentHistory} />
       <Route path="/history" component={ContentHistory} />
+      <Route path="/product-sets" component={ProductSets} />
       <Route path="/social-sync" component={SocialSync} />
       <Route path="/import" component={PerformanceImport} />
       <Route path="/ads-recommendation" component={AdsRecommendation} />
@@ -40,7 +43,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="dark">
+    <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
           <DashboardLayout>

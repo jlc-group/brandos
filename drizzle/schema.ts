@@ -198,8 +198,15 @@ export const contentHistory = pgTable("content_history", {
   views: integer("views").default(0),
   reach: integer("reach").default(0),
   likes: integer("likes").default(0),
+  bookmarks: integer("bookmarks").default(0),
   comments: integer("comments").default(0),
   shares: integer("shares").default(0),
+  pfmScore: real("pfmScore").default(0),
+  videoDuration: real("videoDuration").default(0),
+  totalMediaCost: real("totalMediaCost").default(0),
+  adsCount: integer("adsCount").default(0),
+  contentStatus: varchar("contentStatus", { length: 80 }),
+  contentExpireDate: timestamp("contentExpireDate"),
   rawData: json("rawData").$type<Record<string, unknown>>(),
   lastSyncedAt: timestamp("lastSyncedAt"),
   notes: text("notes"),
@@ -211,6 +218,54 @@ export const contentHistory = pgTable("content_history", {
 
 export type ContentHistory = typeof contentHistory.$inferSelect;
 export type InsertContentHistory = typeof contentHistory.$inferInsert;
+
+export const contentHistorySkus = pgTable("content_history_skus", {
+  id: serial("id").primaryKey(),
+  contentHistoryId: integer("contentHistoryId").references(() => contentHistory.id).notNull(),
+  skuId: integer("skuId").references(() => skus.id).notNull(),
+  skuCodeSnapshot: varchar("skuCodeSnapshot", { length: 100 }),
+  skuNameSnapshot: varchar("skuNameSnapshot", { length: 200 }),
+  position: integer("position").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  contentSkuUnique: uniqueIndex("content_history_skus_content_sku_unique").on(table.contentHistoryId, table.skuId),
+}));
+
+export type ContentHistorySku = typeof contentHistorySkus.$inferSelect;
+
+export const productSets = pgTable("product_sets", {
+  id: serial("id").primaryKey(),
+  brandId: integer("brandId").references(() => brands.id),
+  key: varchar("key", { length: 500 }).notNull(),
+  name: varchar("name", { length: 500 }).notNull(),
+  skuCount: integer("skuCount").default(0),
+  contentCount: integer("contentCount").default(0),
+  totalViews: real("totalViews").default(0),
+  totalReach: real("totalReach").default(0),
+  totalMediaCost: real("totalMediaCost").default(0),
+  avgPfmScore: real("avgPfmScore").default(0),
+  lastContentAt: timestamp("lastContentAt"),
+  source: varchar("source", { length: 80 }).default("auto"),
+  status: varchar("status", { length: 50 }).default("active"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({
+  productSetBrandKeyUnique: uniqueIndex("product_sets_brand_key_unique").on(table.brandId, table.key),
+}));
+
+export const productSetSkus = pgTable("product_set_skus", {
+  id: serial("id").primaryKey(),
+  productSetId: integer("productSetId").references(() => productSets.id).notNull(),
+  skuId: integer("skuId").references(() => skus.id).notNull(),
+  skuCodeSnapshot: varchar("skuCodeSnapshot", { length: 100 }),
+  skuNameSnapshot: varchar("skuNameSnapshot", { length: 200 }),
+  position: integer("position").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  productSetSkuUnique: uniqueIndex("product_set_skus_set_sku_unique").on(table.productSetId, table.skuId),
+}));
+
+export type ProductSet = typeof productSets.$inferSelect;
 
 // ─── Performance Data ──────────────────────────────────────────────────────────
 

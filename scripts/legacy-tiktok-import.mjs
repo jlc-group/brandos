@@ -252,10 +252,11 @@ async function importTikTokPosts(legacyDb, brandosDb) {
     const contentResult = await brandosDb.query(
       `insert into content_history (
         "brandId", "externalId", title, "contentType", caption, platform, "publishedAt",
-        "videoUrl", "thumbnailUrl", views, reach, likes, comments, shares, "rawData",
+        "videoUrl", "thumbnailUrl", views, reach, likes, bookmarks, comments, shares,
+        "pfmScore", "videoDuration", "totalMediaCost", "adsCount", "contentStatus", "contentExpireDate", "rawData",
         "lastSyncedAt", notes, "createdAt", "updatedAt"
       )
-      values ($1,$2,$3,$4,$5,'tiktok',$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15,now(),now())
+      values ($1,$2,$3,$4,$5,'tiktok',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),$21,now(),now())
       on conflict (platform, "externalId") do update set
         title = excluded.title,
         "contentType" = excluded."contentType",
@@ -266,8 +267,15 @@ async function importTikTokPosts(legacyDb, brandosDb) {
         views = excluded.views,
         reach = excluded.reach,
         likes = excluded.likes,
+        bookmarks = excluded.bookmarks,
         comments = excluded.comments,
         shares = excluded.shares,
+        "pfmScore" = excluded."pfmScore",
+        "videoDuration" = excluded."videoDuration",
+        "totalMediaCost" = excluded."totalMediaCost",
+        "adsCount" = excluded."adsCount",
+        "contentStatus" = excluded."contentStatus",
+        "contentExpireDate" = excluded."contentExpireDate",
         "rawData" = excluded."rawData",
         "lastSyncedAt" = now(),
         "updatedAt" = now()
@@ -284,8 +292,15 @@ async function importTikTokPosts(legacyDb, brandosDb) {
         toNumber(row.video_views),
         toNumber(row.reach),
         toNumber(row.likes),
+        toNumber(row.bookmarks),
         toNumber(row.comments),
         toNumber(row.shares),
+        toNumber(row.pfm_score),
+        toNumber(row.video_duration),
+        toNumber(row.ads_total_media_cost),
+        Array.isArray(toJsonValue(row.ads_details)) ? toJsonValue(row.ads_details).length : 0,
+        row.content_status,
+        row.content_expire_date,
         JSON.stringify(rawData),
         "Imported from TiktokPFMWebApp legacy database",
       ],

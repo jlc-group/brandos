@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -7,9 +7,12 @@ import {
   brandRules,
   contentCalendar,
   contentHistory,
+  contentHistorySkus,
   contentMatrix,
   performanceData,
   adRecommendations,
+  productSets,
+  productSetSkus,
   skus,
   socialAccounts,
   socialSyncRuns,
@@ -312,15 +315,268 @@ export async function getSocialSyncRuns(limit = 20, brandId?: number) {
 
 // ─── Content History ──────────────────────────────────────────────────────────
 
-export async function getContentHistory(limit = 50, offset = 0, brandId?: number) {
+export type ContentHistoryListOptions = {
+  search?: string;
+  view?: "all" | "last100" | "bestPFM" | "notProper" | "shouldRunAds" | "noProductMapping" | "highEngagement" | "multiSku";
+  platform?: string;
+  contentType?: string;
+  skuId?: number;
+  productSetId?: number;
+  mapping?: "all" | "mapped" | "unmapped";
+  status?: "all" | "published" | "unpublished";
+  contentStatus?: string;
+  sortBy?: "publishedAt" | "createdAt" | "views" | "reach" | "likes" | "comments" | "shares" | "bookmarks" | "pfmScore" | "totalMediaCost" | "adsCount";
+  sortDir?: "asc" | "desc";
+};
+
+function buildContentHistoryConditions(brandId?: number, options: ContentHistoryListOptions = {}) {
+  const conditions = [];
+  if (brandId) conditions.push(eq(contentHistory.brandId, brandId));
+  if (options.platform && options.platform !== "all") conditions.push(eq(contentHistory.platform, options.platform));
+  if (options.contentType && options.contentType !== "all") conditions.push(eq(contentHistory.contentType, options.contentType as any));
+  if (options.contentStatus && options.contentStatus !== "all") conditions.push(eq(contentHistory.contentStatus, options.contentStatus));
+  if (options.skuId) {
+    conditions.push(or(
+      eq(contentHistory.skuId, options.skuId),
+      sql`exists (
+        select 1 from "content_history_skus" chs
+        where chs."contentHistoryId" = ${contentHistory.id}
+        and chs."skuId" = ${options.skuId}
+      )`,
+    ));
+  }
+  if (options.productSetId) {
+    conditions.push(sql`not exists (
+      select 1
+      from "product_set_skus" pss
+      where pss."productSetId" = ${options.productSetId}
+        and not exists (
+          select 1
+          from "content_history_skus" chs
+          where chs."contentHistoryId" = ${contentHistory.id}
+            and chs."skuId" = pss."skuId"
+        )
+    )`);
+  }
+  if (options.mapping === "mapped") {
+    conditions.push(or(
+      isNotNull(contentHistory.skuId),
+      sql`exists (
+        select 1 from "content_history_skus" chs
+        where chs."contentHistoryId" = ${contentHistory.id}
+      )`,
+    ));
+  }
+  if (options.mapping === "unmapped") {
+    conditions.push(and(
+      isNull(contentHistory.skuId),
+      sql`not exists (
+        select 1 from "content_history_skus" chs
+        where chs."contentHistoryId" = ${contentHistory.id}
+      )`,
+    ));
+  }
+  if (options.status === "published") conditions.push(isNotNull(contentHistory.publishedAt));
+  if (options.status === "unpublished") conditions.push(isNull(contentHistory.publishedAt));
+  if (options.view === "noProductMapping") {
+    conditions.push(and(
+      isNull(contentHistory.skuId),
+      sql`not exists (
+        select 1 from "content_history_skus" chs
+        where chs."contentHistoryId" = ${contentHistory.id}
+      )`,
+    ));
+  }
+  if (options.view === "multiSku") {
+    conditions.push(sql`(
+      select count(*)
+      from "content_history_skus" chs
+      where chs."contentHistoryId" = ${contentHistory.id}
+    ) > 1`);
+  }
+  if (options.view === "bestPFM") conditions.push(sql`coalesce(${contentHistory.pfmScore}, 0) > 0`);
+  if (options.view === "highEngagement") {
+    conditions.push(sql`(
+      (coalesce(${contentHistory.likes}, 0) + coalesce(${contentHistory.comments}, 0) + coalesce(${contentHistory.shares}, 0))::numeric
+      / nullif(coalesce(${contentHistory.views}, 0), 0)
+    ) >= 0.03`);
+  }
+  if (options.view === "shouldRunAds") {
+    conditions.push(and(
+      sql`coalesce(${contentHistory.contentStatus}, '') not in ('DELETED', 'NO_IDENTITY', 'CLOSE')`,
+      or(isNull(contentHistory.contentExpireDate), sql`${contentHistory.contentExpireDate} > now()`),
+      sql`(
+        coalesce(${contentHistory.pfmScore}, 0) > 0.5
+        or (coalesce(${contentHistory.totalMediaCost}, 0) < 3000 and coalesce(${contentHistory.views}, 0) < 300000)
+      )`,
+      sql`exists (
+        select 1 from "content_history_skus" chs
+        where chs."contentHistoryId" = ${contentHistory.id}
+      )`,
+    ));
+  }
+  if (options.view === "notProper") {
+    conditions.push(or(
+      isNull(contentHistory.contentStatus),
+      sql`coalesce(${contentHistory.contentStatus}, '') in ('', 'NO_IDENTITY')`,
+      isNull(contentHistory.contentExpireDate),
+      and(
+        isNull(contentHistory.skuId),
+        sql`not exists (
+          select 1 from "content_history_skus" chs
+          where chs."contentHistoryId" = ${contentHistory.id}
+        )`,
+      ),
+    ));
+  }
+  const search = options.search?.trim();
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(
+      ilike(contentHistory.title, pattern),
+      ilike(contentHistory.caption, pattern),
+      ilike(contentHistory.hook, pattern),
+      ilike(contentHistory.externalId, pattern),
+    ));
+  }
+  return conditions;
+}
+
+export type ContentSkuMapping = {
+  id: number;
+  skuId: number;
+  sku: string;
+  name: string;
+  category?: string | null;
+  position?: number | null;
+};
+
+async function getContentSkuMappings(contentIds: number[]) {
+  const db = await getDb();
+  if (!db || contentIds.length === 0) return new Map<number, ContentSkuMapping[]>();
+  const rows = await db.select({
+    id: contentHistorySkus.id,
+    contentHistoryId: contentHistorySkus.contentHistoryId,
+    skuId: contentHistorySkus.skuId,
+    sku: skus.sku,
+    name: skus.name,
+    category: skus.category,
+    position: contentHistorySkus.position,
+  })
+    .from(contentHistorySkus)
+    .innerJoin(skus, eq(contentHistorySkus.skuId, skus.id))
+    .where(inArray(contentHistorySkus.contentHistoryId, contentIds))
+    .orderBy(contentHistorySkus.position, skus.name);
+
+  const byContent = new Map<number, ContentSkuMapping[]>();
+  for (const row of rows) {
+    const list = byContent.get(row.contentHistoryId) ?? [];
+    list.push({
+      id: row.id,
+      skuId: row.skuId,
+      sku: row.sku,
+      name: row.name,
+      category: row.category,
+      position: row.position,
+    });
+    byContent.set(row.contentHistoryId, list);
+  }
+  return byContent;
+}
+
+async function enrichContentHistoryRows<T extends { id: number; skuId?: number | null }>(rows: T[]) {
+  const mappings = await getContentSkuMappings(rows.map((row) => row.id));
+  return rows.map((row) => ({
+    ...row,
+    skuMappings: mappings.get(row.id) ?? [],
+  }));
+}
+
+function getContentHistoryOrder(options: ContentHistoryListOptions = {}) {
+  const sortColumns = {
+    publishedAt: contentHistory.publishedAt,
+    createdAt: contentHistory.createdAt,
+    views: contentHistory.views,
+    reach: contentHistory.reach,
+    likes: contentHistory.likes,
+    comments: contentHistory.comments,
+    shares: contentHistory.shares,
+    bookmarks: contentHistory.bookmarks,
+    pfmScore: contentHistory.pfmScore,
+    totalMediaCost: contentHistory.totalMediaCost,
+    adsCount: contentHistory.adsCount,
+  };
+  const defaultSort = options.view === "bestPFM"
+    ? "pfmScore"
+    : options.view === "shouldRunAds"
+      ? "pfmScore"
+      : "publishedAt";
+  const sortColumn = sortColumns[options.sortBy ?? defaultSort];
+  return options.sortDir === "asc"
+    ? sql`${sortColumn} asc nulls last`
+    : sql`${sortColumn} desc nulls last`;
+}
+
+export async function getContentHistory(
+  limit = 50,
+  offset = 0,
+  brandId?: number,
+  options: ContentHistoryListOptions = {},
+) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = brandId ? [eq(contentHistory.brandId, brandId)] : [];
-  return db.select().from(contentHistory)
+  const conditions = buildContentHistoryConditions(brandId, options);
+  const rows = await db.select().from(contentHistory)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(contentHistory.publishedAt))
+    .orderBy(getContentHistoryOrder(options), desc(contentHistory.id))
     .limit(limit)
     .offset(offset);
+  return enrichContentHistoryRows(rows);
+}
+
+export async function getContentHistoryById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(contentHistory).where(eq(contentHistory.id, id)).limit(1);
+  const enriched = await enrichContentHistoryRows(result);
+  return enriched[0];
+}
+
+export async function getContentHistorySummary(brandId?: number, options: ContentHistoryListOptions = {}) {
+  const db = await getDb();
+  if (!db) {
+    return {
+      totalContents: 0,
+      totalViews: 0,
+      totalReach: 0,
+      totalLikes: 0,
+      totalComments: 0,
+      totalShares: 0,
+      avgScore: 0,
+    };
+  }
+  const conditions = buildContentHistoryConditions(brandId, options);
+  const result = await db.select({
+    totalContents: sql<number>`count(*)`,
+    totalViews: sql<number>`coalesce(sum(${contentHistory.views}), 0)`,
+    totalReach: sql<number>`coalesce(sum(${contentHistory.reach}), 0)`,
+    totalLikes: sql<number>`coalesce(sum(${contentHistory.likes}), 0)`,
+    totalComments: sql<number>`coalesce(sum(${contentHistory.comments}), 0)`,
+    totalShares: sql<number>`coalesce(sum(${contentHistory.shares}), 0)`,
+    avgScore: sql<number>`coalesce(avg(((coalesce(${contentHistory.likes}, 0) + coalesce(${contentHistory.comments}, 0) + coalesce(${contentHistory.shares}, 0))::numeric * 100) / nullif(coalesce(${contentHistory.views}, 0), 0)), 0)`,
+  }).from(contentHistory)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+  const summary = result[0];
+  return {
+    totalContents: Number(summary?.totalContents ?? 0),
+    totalViews: Number(summary?.totalViews ?? 0),
+    totalReach: Number(summary?.totalReach ?? 0),
+    totalLikes: Number(summary?.totalLikes ?? 0),
+    totalComments: Number(summary?.totalComments ?? 0),
+    totalShares: Number(summary?.totalShares ?? 0),
+    avgScore: Number(summary?.avgScore ?? 0),
+  };
 }
 
 export async function createContentHistory(data: InsertContentHistory) {
@@ -364,6 +620,102 @@ export async function updateContentHistory(id: number, data: Partial<InsertConte
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
   return db.update(contentHistory).set({ ...data, updatedAt: new Date() }).where(eq(contentHistory.id, id));
+}
+
+export async function updateContentHistorySkus(contentHistoryId: number, skuIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const uniqueSkuIds = Array.from(new Set(skuIds.filter((id) => Number.isFinite(id))));
+
+  await db.delete(contentHistorySkus).where(eq(contentHistorySkus.contentHistoryId, contentHistoryId));
+  if (uniqueSkuIds.length > 0) {
+    const skuRows = await db.select().from(skus).where(inArray(skus.id, uniqueSkuIds));
+    const skuMap = new Map(skuRows.map((sku) => [sku.id, sku]));
+    await db.insert(contentHistorySkus).values(uniqueSkuIds.map((skuId, index) => {
+      const sku = skuMap.get(skuId);
+      return {
+        contentHistoryId,
+        skuId,
+        skuCodeSnapshot: sku?.sku,
+        skuNameSnapshot: sku?.name,
+        position: index,
+      };
+    }));
+  }
+
+  await db.update(contentHistory)
+    .set({ skuId: uniqueSkuIds[0] ?? null, updatedAt: new Date() })
+    .where(eq(contentHistory.id, contentHistoryId));
+
+  return { count: uniqueSkuIds.length };
+}
+
+// ─── Product Sets ─────────────────────────────────────────────────────────────
+
+export type ProductSetListOptions = {
+  brandId?: number;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sortBy?: "contentCount" | "avgPfmScore" | "totalViews" | "totalMediaCost" | "lastContentAt";
+  sortDir?: "asc" | "desc";
+};
+
+export async function getProductSets(options: ProductSetListOptions = {}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(productSets.status, "active")];
+  if (options.brandId) conditions.push(eq(productSets.brandId, options.brandId));
+  if (options.search?.trim()) {
+    const pattern = `%${options.search.trim()}%`;
+    const searchCondition = or(ilike(productSets.key, pattern), ilike(productSets.name, pattern));
+    if (searchCondition) conditions.push(searchCondition);
+  }
+  const sortColumns = {
+    contentCount: productSets.contentCount,
+    avgPfmScore: productSets.avgPfmScore,
+    totalViews: productSets.totalViews,
+    totalMediaCost: productSets.totalMediaCost,
+    lastContentAt: productSets.lastContentAt,
+  };
+  const sortColumn = sortColumns[options.sortBy ?? "contentCount"];
+  const rows = await db.select().from(productSets)
+    .where(and(...conditions))
+    .orderBy(options.sortDir === "asc" ? sql`${sortColumn} asc nulls last` : sql`${sortColumn} desc nulls last`, productSets.key)
+    .limit(options.limit ?? 100)
+    .offset(options.offset ?? 0);
+
+  const ids = rows.map((row) => row.id);
+  if (ids.length === 0) return [];
+  const skuRows = await db.select({
+    productSetId: productSetSkus.productSetId,
+    skuId: productSetSkus.skuId,
+    sku: skus.sku,
+    name: skus.name,
+    position: productSetSkus.position,
+  })
+    .from(productSetSkus)
+    .innerJoin(skus, eq(productSetSkus.skuId, skus.id))
+    .where(inArray(productSetSkus.productSetId, ids))
+    .orderBy(productSetSkus.productSetId, productSetSkus.position, skus.sku);
+
+  const bySet = new Map<number, Array<{ skuId: number; sku: string; name: string; position: number | null }>>();
+  for (const sku of skuRows) {
+    const list = bySet.get(sku.productSetId) ?? [];
+    list.push({ skuId: sku.skuId, sku: sku.sku, name: sku.name, position: sku.position });
+    bySet.set(sku.productSetId, list);
+  }
+  return rows.map((row) => ({ ...row, skus: bySet.get(row.id) ?? [] }));
+}
+
+export async function getProductSetById(id: number) {
+  const sets = await getProductSets({ limit: 1, offset: 0 });
+  const db = await getDb();
+  if (!db) return undefined;
+  const [row] = await db.select().from(productSets).where(eq(productSets.id, id)).limit(1);
+  if (!row) return undefined;
+  const enriched = await getProductSets({ search: row.key, brandId: row.brandId ?? undefined, limit: 20 });
+  return enriched.find((set) => set.id === id) ?? sets.find((set) => set.id === id);
 }
 
 export async function deleteContentHistory(id: number) {
