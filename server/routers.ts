@@ -36,7 +36,15 @@ import {
   getDashboardKPIs,
   getAllBrands,
   upsertBrand,
+  getSocialAccounts,
+  upsertSocialAccount,
 } from "./db";
+import {
+  getSocialSyncStatus,
+  syncFacebookPosts,
+  syncTikTokAds,
+  syncTikTokContent,
+} from "./socialSync";
 
 // ─── Brands Router ────────────────────────────────────────────────────────────
 const brandsRouter = router({
@@ -375,6 +383,58 @@ ${JSON.stringify(data.slice(0, 10), null, 2)}
     }),
 });
 
+// ─── Social Sync Router ────────────────────────────────────────────────────────
+const socialRouter = router({
+  status: protectedProcedure
+    .input(z.object({ brandId: z.number().optional() }).optional())
+    .query(({ input }) => getSocialSyncStatus(input?.brandId)),
+  accounts: protectedProcedure
+    .input(z.object({
+      brandId: z.number().optional(),
+      platform: z.string().optional(),
+    }).optional())
+    .query(({ input }) => getSocialAccounts(input?.brandId, input?.platform)),
+  upsertAccount: protectedProcedure
+    .input(z.object({
+      brandId: z.number(),
+      platform: z.enum(["tiktok", "facebook"]),
+      accountKey: z.string().min(1),
+      accountName: z.string().optional(),
+      pageId: z.string().optional(),
+      businessId: z.string().optional(),
+      advertiserId: z.string().optional(),
+      accessTokenEnvKey: z.string().optional(),
+      refreshTokenEnvKey: z.string().optional(),
+      status: z.string().default("active"),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }))
+    .mutation(({ input }) => upsertSocialAccount(input)),
+  syncTikTokContent: protectedProcedure
+    .input(z.object({
+      brandId: z.number().default(1),
+      accountId: z.number().optional(),
+      businessId: z.string().optional(),
+      maxPages: z.number().min(1).max(20).default(5),
+    }))
+    .mutation(({ input }) => syncTikTokContent(input)),
+  syncFacebookPosts: protectedProcedure
+    .input(z.object({
+      brandId: z.number().default(1),
+      accountId: z.number().optional(),
+      pageId: z.string().optional(),
+      daysBack: z.number().min(1).max(3650).default(365),
+      skipInsights: z.boolean().default(false),
+    }))
+    .mutation(({ input }) => syncFacebookPosts(input)),
+  syncTikTokAds: protectedProcedure
+    .input(z.object({
+      brandId: z.number().default(1),
+      accountId: z.number().optional(),
+      advertiserId: z.string().optional(),
+    }))
+    .mutation(({ input }) => syncTikTokAds(input)),
+});
+
 // ─── Anti-Annoy Router ────────────────────────────────────────────────────────
 const antiAnnoyRouter = router({
   analyze: protectedProcedure
@@ -580,6 +640,7 @@ export const appRouter = router({
   calendar: calendarRouter,
   history: historyRouter,
   performance: performanceRouter,
+  social: socialRouter,
   antiAnnoy: antiAnnoyRouter,
   aiGenerator: aiGeneratorRouter,
   adsRecommendation: adsRecommendationRouter,

@@ -136,6 +136,14 @@ async function exchangeCodeForToken(
   return (data.data ?? data) as JlcTokenResponse;
 }
 
+function getJlcCallbackRedirectUri(req: Request): string {
+  const publicBaseUrl = process.env.BRANDOS_PUBLIC_URL ?? process.env.PUBLIC_URL;
+  if (publicBaseUrl) {
+    return `${publicBaseUrl.replace(/\/+$/, "")}/api/auth/jlc/callback`;
+  }
+  return `${req.protocol}://${req.get("host")}/api/auth/jlc/callback`;
+}
+
 async function getUserInfo(accessToken: string): Promise<JlcUserInfo> {
   const url = `${JLC_SSO_CONFIG.ssoBaseUrl}/oauth/userinfo`;
   const res = await fetch(url, {
@@ -170,7 +178,7 @@ export function registerJlcAuthRoutes(app: Express) {
       return res.status(400).json({ error: "Missing authorization code" });
     }
 
-    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/jlc/callback`;
+    const redirectUri = getJlcCallbackRedirectUri(req);
 
     try {
       // Exchange code for token

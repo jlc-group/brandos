@@ -9,6 +9,7 @@ import {
   boolean,
   json,
   serial,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
@@ -132,12 +133,60 @@ export const contentCalendar = pgTable("content_calendar", {
 export type ContentCalendar = typeof contentCalendar.$inferSelect;
 export type InsertContentCalendar = typeof contentCalendar.$inferInsert;
 
+// ─── Social Sync Accounts ─────────────────────────────────────────────────────
+
+export const socialAccounts = pgTable("social_accounts", {
+  id: serial("id").primaryKey(),
+  brandId: integer("brandId").references(() => brands.id).notNull(),
+  platform: varchar("platform", { length: 50 }).notNull(),
+  accountKey: varchar("accountKey", { length: 200 }).notNull(),
+  accountName: varchar("accountName", { length: 200 }),
+  pageId: varchar("pageId", { length: 100 }),
+  businessId: varchar("businessId", { length: 100 }),
+  advertiserId: varchar("advertiserId", { length: 100 }),
+  accessTokenEnvKey: varchar("accessTokenEnvKey", { length: 100 }),
+  refreshTokenEnvKey: varchar("refreshTokenEnvKey", { length: 100 }),
+  status: varchar("status", { length: 50 }).default("active").notNull(),
+  lastSyncedAt: timestamp("lastSyncedAt"),
+  lastError: text("lastError"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({
+  platformAccountUnique: uniqueIndex("social_accounts_platform_account_unique").on(
+    table.brandId,
+    table.platform,
+    table.accountKey,
+  ),
+}));
+
+export type SocialAccount = typeof socialAccounts.$inferSelect;
+export type InsertSocialAccount = typeof socialAccounts.$inferInsert;
+
+export const socialSyncRuns = pgTable("social_sync_runs", {
+  id: serial("id").primaryKey(),
+  socialAccountId: integer("socialAccountId").references(() => socialAccounts.id),
+  brandId: integer("brandId").references(() => brands.id).notNull(),
+  platform: varchar("platform", { length: 50 }).notNull(),
+  syncType: varchar("syncType", { length: 50 }).notNull(),
+  status: varchar("status", { length: 50 }).default("running").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  finishedAt: timestamp("finishedAt"),
+  stats: json("stats").$type<Record<string, unknown>>(),
+  error: text("error"),
+});
+
+export type SocialSyncRun = typeof socialSyncRuns.$inferSelect;
+export type InsertSocialSyncRun = typeof socialSyncRuns.$inferInsert;
+
 // ─── Content History ───────────────────────────────────────────────────────────
 
 export const contentHistory = pgTable("content_history", {
   id: serial("id").primaryKey(),
   brandId: integer("brandId").references(() => brands.id),
   skuId: integer("skuId").references(() => skus.id),
+  socialAccountId: integer("socialAccountId").references(() => socialAccounts.id),
+  externalId: varchar("externalId", { length: 200 }),
   title: varchar("title", { length: 300 }).notNull(),
   contentType: contentTypeEnum("contentType").notNull(),
   hook: text("hook"),
@@ -145,14 +194,20 @@ export const contentHistory = pgTable("content_history", {
   platform: varchar("platform", { length: 50 }).default("tiktok"),
   publishedAt: timestamp("publishedAt"),
   videoUrl: text("videoUrl"),
+  thumbnailUrl: text("thumbnailUrl"),
   views: integer("views").default(0),
+  reach: integer("reach").default(0),
   likes: integer("likes").default(0),
   comments: integer("comments").default(0),
   shares: integer("shares").default(0),
+  rawData: json("rawData").$type<Record<string, unknown>>(),
+  lastSyncedAt: timestamp("lastSyncedAt"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  platformExternalUnique: uniqueIndex("content_history_platform_external_unique").on(table.platform, table.externalId),
+}));
 
 export type ContentHistory = typeof contentHistory.$inferSelect;
 export type InsertContentHistory = typeof contentHistory.$inferInsert;
@@ -163,6 +218,8 @@ export const performanceData = pgTable("performance_data", {
   id: serial("id").primaryKey(),
   brandId: integer("brandId").references(() => brands.id),
   skuId: integer("skuId").references(() => skus.id),
+  contentHistoryId: integer("contentHistoryId").references(() => contentHistory.id),
+  externalId: varchar("externalId", { length: 200 }),
   adId: varchar("adId", { length: 100 }),
   adName: varchar("adName", { length: 300 }),
   campaignId: varchar("campaignId", { length: 100 }),

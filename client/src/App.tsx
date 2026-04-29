@@ -15,6 +15,7 @@ import AiGenerator from "./pages/AiGenerator";
 import ContentHistory from "./pages/ContentHistory";
 import PerformanceImport from "./pages/PerformanceImport";
 import AdsRecommendation from "./pages/AdsRecommendation";
+import SocialSync from "./pages/SocialSync";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/performance" component={PerformanceAnalysis} />
       <Route path="/ai-generator" component={AiGenerator} />
       <Route path="/history" component={ContentHistory} />
+      <Route path="/social-sync" component={SocialSync} />
       <Route path="/import" component={PerformanceImport} />
       <Route path="/ads-recommendation" component={AdsRecommendation} />
       <Route path="/404" component={NotFound} />

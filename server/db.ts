@@ -11,6 +11,8 @@ import {
   performanceData,
   adRecommendations,
   skus,
+  socialAccounts,
+  socialSyncRuns,
   users,
   type InsertBrand,
   type InsertBrandRule,
@@ -20,6 +22,8 @@ import {
   type InsertPerformanceData,
   type InsertAdRecommendation,
   type InsertSku,
+  type InsertSocialAccount,
+  type InsertSocialSyncRun,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -233,6 +237,79 @@ export async function deleteCalendarEntry(id: number) {
   return db.delete(contentCalendar).where(eq(contentCalendar.id, id));
 }
 
+// ─── Social Sync ───────────────────────────────────────────────────────────────
+
+export async function getSocialAccounts(brandId?: number, platform?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (brandId) conditions.push(eq(socialAccounts.brandId, brandId));
+  if (platform) conditions.push(eq(socialAccounts.platform, platform));
+  return db.select().from(socialAccounts)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(socialAccounts.platform, socialAccounts.accountName);
+}
+
+export async function upsertSocialAccount(data: InsertSocialAccount) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const result = await db.insert(socialAccounts).values(data).onConflictDoUpdate({
+    target: [socialAccounts.brandId, socialAccounts.platform, socialAccounts.accountKey],
+    set: {
+      accountName: data.accountName,
+      pageId: data.pageId,
+      businessId: data.businessId,
+      advertiserId: data.advertiserId,
+      accessTokenEnvKey: data.accessTokenEnvKey,
+      refreshTokenEnvKey: data.refreshTokenEnvKey,
+      status: data.status ?? "active",
+      lastError: null,
+      metadata: data.metadata,
+      updatedAt: new Date(),
+    },
+  }).returning({ id: socialAccounts.id });
+  return result[0].id;
+}
+
+export async function updateSocialAccountSyncState(
+  id: number,
+  data: { lastSyncedAt?: Date | null; lastError?: string | null; status?: string },
+) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  return db.update(socialAccounts)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(socialAccounts.id, id));
+}
+
+export async function createSocialSyncRun(data: InsertSocialSyncRun) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const result = await db.insert(socialSyncRuns).values(data).returning({ id: socialSyncRuns.id });
+  return result[0].id;
+}
+
+export async function finishSocialSyncRun(
+  id: number,
+  data: { status: "success" | "failed"; stats?: Record<string, unknown>; error?: string | null },
+) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  return db.update(socialSyncRuns)
+    .set({ ...data, finishedAt: new Date() })
+    .where(eq(socialSyncRuns.id, id));
+}
+
+export async function getSocialSyncRuns(limit = 20, brandId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = brandId ? [eq(socialSyncRuns.brandId, brandId)] : [];
+  return db.select().from(socialSyncRuns)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(socialSyncRuns.startedAt))
+    .limit(limit);
+}
+
 // ─── Content History ──────────────────────────────────────────────────────────
 
 export async function getContentHistory(limit = 50, offset = 0, brandId?: number) {
@@ -250,6 +327,36 @@ export async function createContentHistory(data: InsertContentHistory) {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
   const result = await db.insert(contentHistory).values(data).returning({ id: contentHistory.id });
+  return result[0].id;
+}
+
+export async function upsertContentHistoryByExternalId(data: InsertContentHistory) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  if (!data.platform || !data.externalId) return createContentHistory(data);
+  const result = await db.insert(contentHistory).values(data).onConflictDoUpdate({
+    target: [contentHistory.platform, contentHistory.externalId],
+    set: {
+      brandId: data.brandId,
+      skuId: data.skuId,
+      socialAccountId: data.socialAccountId,
+      title: data.title,
+      contentType: data.contentType,
+      hook: data.hook,
+      caption: data.caption,
+      publishedAt: data.publishedAt,
+      videoUrl: data.videoUrl,
+      thumbnailUrl: data.thumbnailUrl,
+      views: data.views,
+      reach: data.reach,
+      likes: data.likes,
+      comments: data.comments,
+      shares: data.shares,
+      rawData: data.rawData,
+      lastSyncedAt: new Date(),
+      updatedAt: new Date(),
+    },
+  }).returning({ id: contentHistory.id });
   return result[0].id;
 }
 
@@ -281,6 +388,14 @@ export async function getPerformanceData(from?: Date, to?: Date, limit = 100, br
 }
 
 export async function insertPerformanceData(data: InsertPerformanceData[]) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  if (data.length === 0) return 0;
+  await db.insert(performanceData).values(data);
+  return data.length;
+}
+
+export async function insertSocialPerformanceData(data: InsertPerformanceData[]) {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
   if (data.length === 0) return 0;

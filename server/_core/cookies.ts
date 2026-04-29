@@ -9,6 +9,10 @@ function isIpAddress(host: string) {
 }
 
 function isSecureRequest(req: Request) {
+  const publicBaseUrl = process.env.BRANDOS_PUBLIC_URL ?? process.env.PUBLIC_URL;
+  if (publicBaseUrl?.startsWith("https://")) return true;
+  if (process.env.NODE_ENV === "production") return true;
+
   if (req.protocol === "https") return true;
 
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -42,7 +46,7 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    sameSite: "lax",
     secure: isSecureRequest(req),
   };
 }

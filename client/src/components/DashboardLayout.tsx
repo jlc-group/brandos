@@ -34,6 +34,7 @@ import {
   LogOut,
   Package,
   PanelLeft,
+  RadioTower,
   ShieldAlert,
   Sparkles,
   TrendingUp,
@@ -71,6 +72,7 @@ const menuGroups = [
     label: "Performance",
     items: [
       { icon: BarChart3, label: "Performance Analysis", path: "/performance" },
+      { icon: RadioTower, label: "Social Sync", path: "/social-sync" },
       { icon: Upload, label: "Import Data", path: "/import" },
       { icon: Zap, label: "Ads Recommendation", path: "/ads-recommendation" },
     ],
